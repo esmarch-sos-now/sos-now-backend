@@ -1,0 +1,18 @@
+name: main-only-from-dev
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  check-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR vào main phải đến từ dev
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "::error::PR vào main chỉ được mở từ nhánh dev (đang là '${{ github.head_ref }}')."
+            exit 1
+          fi
+          echo "OK: PR từ dev."
