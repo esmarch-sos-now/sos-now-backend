@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.hexacare.sosnow.model.Facility;
 import vn.hexacare.sosnow.model.FacilityPhone;
@@ -18,11 +19,16 @@ import vn.hexacare.sosnow.model.FacilityType;
 import vn.hexacare.sosnow.repository.FacilityRepository;
 import vn.hexacare.sosnow.repository.SosAlertRepository;
 import vn.hexacare.sosnow.service.FacilityCatalog;
+import vn.hexacare.sosnow.service.RoadDistanceService;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -35,11 +41,15 @@ class FacilityApiTests {
     @Autowired FacilityRepository repository;
     @Autowired SosAlertRepository alerts;
     @Autowired FacilityCatalog catalog;
+    // Road routing depends on the bundled OSM graph; stub it so these tests check ranking and the API contract.
+    @MockitoBean RoadDistanceService roadDistances;
 
     @BeforeEach
     void reset() {
         repository.deleteAll();
         catalog.invalidate();
+        when(roadDistances.distancesMeters(anyDouble(), anyDouble(), anyList()))
+                .thenAnswer(call -> Collections.nCopies(call.<List<?>>getArgument(2).size(), null));
     }
 
     @Test
@@ -55,6 +65,7 @@ class FacilityApiTests {
                 .andExpect(jsonPath("$[0].latitude").value(10.80))
                 .andExpect(jsonPath("$[0].longitude").value(106.70))
                 .andExpect(jsonPath("$[0].distanceMeters").value(0))
+                .andExpect(jsonPath("$[0].distanceMethod").value("STRAIGHT_LINE"))
                 .andExpect(jsonPath("$[0].hasEmergency").value(true))
                 .andExpect(jsonPath("$[0].phones[0].number").value("02800000000"))
                 .andExpect(jsonPath("$[0].phones[0].is24h").value(true))
@@ -79,13 +90,13 @@ class FacilityApiTests {
     }
 
     @Test
-    void prioritizesEmergency24hThenEmergencyThenDistance() throws Exception {
+    void sortsByDistanceFirstThenEmergencyPriority() throws Exception {
         save("clinic", 10.80, false, true, Instant.now());
         save("day-emergency", 10.81, true, false, Instant.now());
         save("night-far", 10.83, true, true, Instant.now());
         save("night-near", 10.82, true, true, Instant.now());
         mvc.perform(get("/api/facilities/nearby").param("lat", "10.80").param("lng", "106.70"))
-                .andExpect(jsonPath("$[*].id", contains("night-near", "night-far", "day-emergency", "clinic")));
+                .andExpect(jsonPath("$[*].id", contains("clinic", "day-emergency", "night-near", "night-far")));
     }
 
     @Test
@@ -101,7 +112,7 @@ class FacilityApiTests {
     @Test
     void districtsAreAvailableEvenWithoutFacilityData() throws Exception {
         mvc.perform(get("/api/districts")).andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(22))).andExpect(jsonPath("$", hasItem("Bình Thạnh")));
+                .andExpect(jsonPath("$", hasSize(23))).andExpect(jsonPath("$", hasItem("Bình Thạnh")));
         mvc.perform(get("/api/facilities").param("district", "Hà Nội")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/facilities")).andExpect(status().isBadRequest());
     }
